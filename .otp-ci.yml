@@ -1,0 +1,157 @@
+stages:
+  - build
+  - test
+
+variables:
+  # Ubuntu base docker image (without any dependencies)
+  UBUNTU_BASE_IMAGE: $CI_REGISTRY/erlang/otp/ubuntu-base
+  # Ubuntu docker image with all OTP dependencies
+  UBUNTU_IMAGE: $CI_REGISTRY/erlang/otp/ubuntu-otp
+
+base-image-ubuntu:
+  stage: build
+  when: manual
+  image: docker:stable
+  tags:
+    - linux
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - cd .github/dockerfiles
+    - docker build -t $UBUNTU_BASE_IMAGE:latest -f Dockerfile.ubuntu-base .
+    - docker push $UBUNTU_BASE_IMAGE:latest
+
+build-ubuntu:
+  image: $UBUNTU_IMAGE:latest
+  tags:
+    - linux
+  stage: build
+  script:
+    - export MAKEFLAGS="-j$(($(nproc) + 2))" ERLC_USE_SERVER=yes CC=clang CXX=clang++ CFLAGS="-O2 -g -Werror"
+    - export ERL_TOP=`pwd`
+    # install OTP into release/otp
+    - ./configure --with-ssl --with-ssl-lib-subdir=lib/x86_64-linux-gnu --prefix=$ERL_TOP/release/otp
+    - make
+    # Disable -Werror as testcases do not compile with it on
+    - export CFLAGS="-O2 -g"
+    - make tests
+    - make install
+  artifacts:
+    paths:
+      - "release/"
+    expire_in: 1 week
+
+static-analysis-ubuntu:
+  tags:
+    - linux
+  needs:
+    - build-ubuntu
+  image: $UBUNTU_IMAGE:latest
+  stage: test
+  script:
+    - export MAKEFLAGS="-j$(($(nproc) + 2))" ERLC_USE_SERVER=yes CC=clang CXX=clang++ CFLAGS="-O2 -g"
+    - export ERL_TOP=`pwd`
+    - echo "Running dialyzer"
+    - scripts/run-dialyzer
+    - echo "Releasing documentation"
+    # make docs does not work without all the prebuilt files everywhere
+    - ./configure --with-ssl --with-ssl-lib-subdir=lib/x86_64-linux-gnu --prefix=$ERL_TOP/release/otp
+    - make
+    - make docs DOC_TARGETS='chunks man html'
+    - make install-docs
+    - echo "Running xmllint"
+    - make xmllint
+    - echo "HTML link checks"
+    - scripts/otp_html_check $ERL_TOP/release/otp/lib/erlang doc/index.html
+
+test-ubuntu-emulator:
+  tags:
+    - linux
+  dependencies:
+    - build-ubuntu
+  image: $UBUNTU_IMAGE:latest
+  stage: test
+  script:
+    # Do not set -Werror, or tests will fail in hardly debuggable way
+    - export MAKEFLAGS="-j$(($(nproc) + 2))" ERLC_USE_SERVER=yes CC=clang CXX=clang++ CFLAGS="-O2 -g"
+    - export ERL_TOP=`pwd`
+    - cd release/tests/test_server
+    - $ERL_TOP/release/otp/bin/ct_run -dir $ERL_TOP/release/tests/emulator_test -ct_hooks cth_surefire [] -noshell -pa $ERL_TOP/release/tests/test_server
+  artifacts:
+    paths:
+      - release/tests/test_server/**
+    reports:
+      junit:
+        - release/tests/test_server/ct_run.*/junit_report.xml
+    expire_in: 1 week
+
+# This job is designed to be executed for Continuous Runs, testing all applications
+test-ubuntu-libs:
+  tags:
+    - linux
+  dependencies:
+    - build-ubuntu
+  image: $UBUNTU_IMAGE:latest
+  stage: test
+  parallel:
+    matrix:
+      - OS: [ubuntu20]
+        APP: [asn1, common_test, compiler, crypto, debugger, dialyzer,
+              diameter, edoc, eldap, erl_docgen, erl_interface, et,
+              eunit, ftp, inets, jinterface, kernel, megaco,
+              mnesia, observer, odbc, os_mon, parsetools, public_key,
+              reltool, runtime_tools, sasl, snmp, ssh, ssl, stdlib,
+              syntax_tools, tftp, tools, wx, xmerl]
+  script:
+    # Do not set -Werror, or tests will fail in hardly debuggable way
+    - export MAKEFLAGS="-j$(($(nproc) + 2))" ERLC_USE_SERVER=yes CC=clang CXX=clang++ CFLAGS="-O2 -g"
+    - export ERL_TOP=`pwd`
+    - cd release/tests/test_server
+    - ERL_FLAGS="-noshell -pa $ERL_TOP/release/tests/test_server" $ERL_TOP/release/otp/bin/ct_run -dir $ERL_TOP/release/tests/${APP}_test -ct_hooks cth_surefire []
+  artifacts:
+    paths:
+        - release/tests/test_server/**
+    reports:
+      junit:
+        - release/tests/test_server/ct_run.*/junit_report.xml
+    expire_in: 1 week
+
+build-freebsd:
+  tags:
+    - freebsd
+  stage: build
+  script:
+    - export MAKEFLAGS="-j `sysctl hw.ncpu|awk '{print $2}'`"
+    - export ERLC_USE_SERVER=yes ERL_TOP=`pwd`
+    # -Werror breaks FreeBSD13 compilation
+    - export CC=clang CXX=clang++ CFLAGS="-O2 -g"
+    - ./configure --prefix=$ERL_TOP/release/otp
+    - gmake
+    - gmake tests
+    - gmake install
+  artifacts:
+    paths:
+      - "release/"
+    expire_in: 1 week
+
+test-freebsd-emulator:
+  tags:
+    - freebsd
+  stage: test
+  dependencies:
+    - build-freebsd
+  script:
+    - export ERLC_USE_SERVER=yes ERL_TOP=`pwd`
+    # -Werror breaks all tests compilation due to warnings
+    - export CC=clang CXX=clang++ CFLAGS="-O2 -g"
+    - cd release/tests/test_server
+    - $ERL_TOP/release/otp/bin/erl -noshell -eval "ts:install(),erlang:halt()."
+    - $ERL_TOP/release/otp/bin/ct_run -dir $ERL_TOP/release/tests/emulator_test -ct_hooks cth_surefire [] -noshell -pa $ERL_TOP/release/tests/test_server
+  artifacts:
+    paths:
+      - release/tests/test_server/**
+    reports:
+      junit:
+        - release/tests/test_server/ct_run.*/junit_report.xml
+    expire_in: 1 week

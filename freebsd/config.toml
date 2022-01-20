@@ -1,0 +1,24 @@
+concurrent = 1
+check_interval = 0
+
+[session_server]
+  session_timeout = 1800
+
+[[runners]]
+  name = "freebsd-13-..."
+  url = "https://..."
+  token = "..."
+  builds_dir = "/home/gitlab-runner/builds"
+  cache_dir = "/home/gitlab-runner/cache"
+  output_limit = 20000
+  executor = "custom"
+
+  [runners.custom_build_dir]
+  [runners.cache]
+    [runners.cache.s3]
+    [runners.cache.gcs]
+
+  [runners.custom]
+    prepare_exec = "/home/gitlab-runner/prepare.sh"
+    run_exec = "/home/gitlab-runner/run.sh"
+    cleanup_exec = "/home/gitlab-runner/cleanup.sh"

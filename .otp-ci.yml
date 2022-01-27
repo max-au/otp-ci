@@ -3,12 +3,12 @@ stages:
   - test
 
 variables:
-  # Ubuntu base docker image (without any dependencies)
-  UBUNTU_BASE_IMAGE: $CI_REGISTRY/erlang/otp/ubuntu-base
+  # Ubuntu docker image
+  UBUNTU_IMAGE: $CI_REGISTRY/erlang/otp/ubuntu-base
+  UBUNTU_IMAGE_ARM64: $CI_REGISTRY/erlang/otp/ubuntu-base-arm64
   # Ubuntu docker image with all OTP dependencies
-  UBUNTU_IMAGE: $CI_REGISTRY/erlang/otp/ubuntu-otp
 
-base-image-ubuntu:
+base-image-ubuntu-x86:
   stage: build
   when: manual
   image: docker:stable
@@ -17,12 +17,41 @@ base-image-ubuntu:
   services:
     - docker:dind
   script:
+    - |
+      echo "
+      FROM ubuntu
+      ENV DEBIAN_FRONTEND=noninteractive
+      ENV LANG=C.UTF-8
+      ENV LC_ALL=C.UTF-8
+      RUN apt-get update && apt-get -y upgrade && apt-get install -y build-essential m4 autoconf fop xsltproc clang clang-format default-jdk libxml2-utils zlib1g-dev libncurses5-dev libssl-dev unixodbc-dev libgmp3-dev libwxbase3.0-dev libwxgtk3.0-gtk3-dev libwxgtk-webview3.0-gtk3-dev libsctp-dev lksctp-tools
+      RUN update-alternatives --set wx-config /usr/lib/x86_64-linux-gnu/wx/config/gtk3-unicode-3.0" >  Dockerfile
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - cd .github/dockerfiles
-    - docker build -t $UBUNTU_BASE_IMAGE:latest -f Dockerfile.ubuntu-base .
-    - docker push $UBUNTU_BASE_IMAGE:latest
+    - docker build -t $UBUNTU_IMAGE:latest .
+    - docker push $UBUNTU_IMAGE:latest
+
+base-image-ubuntu-arm64:
+  stage: build
+  when: manual
+  image: docker:stable
+  tags:
+    - linux-arm64
+  services:
+    - docker:dind
+  script:
+    - |
+      echo "
+      FROM arm64v8/ubuntu
+      ENV DEBIAN_FRONTEND=noninteractive
+      ENV LANG=C.UTF-8
+      ENV LC_ALL=C.UTF-8
+      RUN apt-get update && apt-get -y upgrade && apt-get install -y build-essential m4 autoconf fop xsltproc clang clang-format default-jdk libxml2-utils zlib1g-dev libncurses5-dev libssl-dev unixodbc-dev libgmp3-dev libwxbase3.0-dev libwxgtk3.0-gtk3-dev libwxgtk-webview3.0-gtk3-dev libsctp-dev lksctp-tools
+      RUN update-alternatives --set wx-config /usr/lib/x86_64-linux-gnu/wx/config/gtk3-unicode-3.0" >  Dockerfile
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build --platform linux/arm64/v8 -t $UBUNTU_IMAGE_ARM64:latest .
+    - docker push $UBUNTU_IMAGE_ARM64:latest
 
 build-ubuntu:
+  when: manual
   image: $UBUNTU_IMAGE:latest
   tags:
     - linux
@@ -45,6 +74,7 @@ build-ubuntu:
     expire_in: 1 week
 
 static-analysis-ubuntu:
+  when: manual
   tags:
     - linux
   needs:
@@ -68,6 +98,7 @@ static-analysis-ubuntu:
     - scripts/otp_html_check $ERL_TOP/release/otp/lib/erlang doc/index.html
 
 test-ubuntu-emulator:
+  when: manual
   tags:
     - linux
   dependencies:
@@ -91,6 +122,7 @@ test-ubuntu-emulator:
 
 # This job is designed to be executed for Continuous Runs, testing all applications
 test-ubuntu-libs:
+  when: manual
   tags:
     - linux
   dependencies:
@@ -122,6 +154,7 @@ test-ubuntu-libs:
     expire_in: 1 week
 
 build-freebsd:
+  when: manual
   tags:
     - freebsd
   stage: build
@@ -142,6 +175,7 @@ build-freebsd:
     expire_in: 1 week
 
 test-freebsd-emulator:
+  when: manual
   tags:
     - freebsd
   stage: test
@@ -164,6 +198,7 @@ test-freebsd-emulator:
 
 # This job is designed to be executed for Continuous Runs, testing all applications
 test-freebsd-libs:
+  when: manual
   tags:
     - freebsd
   dependencies:
